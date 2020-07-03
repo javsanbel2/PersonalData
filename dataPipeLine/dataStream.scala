@@ -1,0 +1,96 @@
+package consumer.stockData
+
+import org.apache.spark.SparkConf
+import org.apache.spark.SparkContext._
+import org.apache.log4j._
+import org.apache.spark.sql.SparkSession
+import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.apache.kafka.common.serialization.StringDeserializer
+import org.apache.spark.streaming._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.functions._
+import java.sql.Timestamp
+import com.mongodb.spark._
+import com.mongodb.spark.config._
+
+
+object dataStream {
+  
+  //function to re-affirm dataType
+  def checkData(df: DataFrame): DataFrame = {
+      var tmpDf = df.schema("date_time").dataType match {
+          case StringType => df.withColumn("date_time", ((col("date_time").cast("Long"))/1000000000).cast("timestamp"))
+          case LongType => df.withColumn("date_time",(col("date_time")/1000000000).cast("timestamp"))
+          case _ => df
+      }
+      tmpDf = tmpDf.schema("price").dataType match {
+          case StringType => tmpDf.withColumn("price",col("price").cast("Double"))
+          case _ => tmpDf
+      }
+      tmpDf = tmpDf.schema("exchange_id").dataType match {
+          case StringType => tmpDf.withColumn("exchange_id",col("exchange_id").cast("Int"))
+          case _ => tmpDf
+      }
+      tmpDf = tmpDf.schema("trade_size").dataType match {
+          case StringType => tmpDf.withColumn("trade_size",col("trade_size").cast("Int"))
+          case _ => tmpDf
+      }
+      return tmpDf.toDF
+  }
+  
+  
+  def main(args : Array[String]){
+    println("helloe")
+    println(java.time.LocalDate.now)
+    Logger.getLogger("org").setLevel(Level.ERROR)
+     val spark: SparkSession = SparkSession.builder()
+      .master("local[*]")
+      .appName("kafkaStream")
+      .getOrCreate()
+      
+    import spark.implicits._
+    //dummpy data for test
+    val someDF = Seq(("LOLL",287.33,17,2, Timestamp.valueOf("2020-06-29 15:26:48"))).toDF("t", "p","x","s","dt")
+          
+    //reading data from spark and extracting required data
+    val df = spark
+      .read
+      .format("kafka")
+      .option("kafka.bootstrap.servers", "localhost:9092")
+      .option("subscribe", "stockData")
+      .load()
+    df.printSchema
+    
+    val selectDF = df.select(get_json_object(($"value").cast("string"),"$.data.T").alias("ticker"),
+                             get_json_object(($"value").cast("string"),"$.data.p").alias("price"),
+                             get_json_object(($"value").cast("string"),"$.data.x").alias("exchange_id"),
+                             get_json_object(($"value").cast("string"),"$.data.s").alias("trade_size"),
+                             get_json_object(($"value").cast("string"),"$.data.t").alias("date_time"))
+    //drop all rows with null values
+    val temp = selectDF.na.drop()
+    // if null removes properly
+    if(temp.count == selectDF.count){
+        println("error null rows in the dataset")
+    }
+    
+    val temp2 = checkData(temp)
+    temp2.printSchema
+    
+    //testing with dummy data
+    assert(someDF.schema("dt").dataType == temp2.schema("date_time").dataType)
+    assert(someDF.schema("t").dataType == temp2.schema("ticker").dataType)
+    assert(someDF.schema("p").dataType == temp2.schema("price").dataType)
+    assert(someDF.schema("x").dataType == temp2.schema("exchange_id").dataType)
+    assert(someDF.schema("s").dataType == temp2.schema("trade_size").dataType)
+
+    //val historicData = temp2.sort(desc("date_time"))
+    val APPL = temp2.filter("ticker == 'AAPL'").sort(desc("date_time"))
+    val MSFT = temp2.filter("ticker == 'MSFT'").sort(desc("date_time"))
+    val TSLA = temp2.filter("ticker == 'TSLA'").sort(desc("date_time"))
+    //adding data to mongoDB
+    MongoSpark.save(APPL.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.APPL")))
+    MongoSpark.save(MSFT.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.MSFT")))
+    MongoSpark.save(TSLA.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.TSLA")))
+  }
+}
