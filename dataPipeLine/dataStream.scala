@@ -13,6 +13,7 @@ import org.apache.spark.sql.functions._
 import java.sql.Timestamp
 import com.mongodb.spark._
 import com.mongodb.spark.config._
+import scala.util.Try
 
 
 object dataStream {
@@ -84,13 +85,22 @@ object dataStream {
     assert(someDF.schema("x").dataType == temp2.schema("exchange_id").dataType)
     assert(someDF.schema("s").dataType == temp2.schema("trade_size").dataType)
 
-    //val historicData = temp2.sort(desc("date_time"))
-    val APPL = temp2.filter("ticker == 'AAPL'").sort(desc("date_time"))
-    val MSFT = temp2.filter("ticker == 'MSFT'").sort(desc("date_time"))
-    val TSLA = temp2.filter("ticker == 'TSLA'").sort(desc("date_time"))
+    val x = java.time.LocalDate.now
+    //temp2.show
+    
+    val temp3 = temp2.filter(to_date(temp2("date_time")) === x.toString())
+    //temp3.show
+    val APPL = temp3.filter("ticker == 'AAPL'").sort(desc("date_time"))
+    val MSFT = temp3.filter("ticker == 'MSFT'").sort(desc("date_time"))
+    val TSLA = temp3.filter("ticker == 'TSLA'").sort(desc("date_time"))
     //adding data to mongoDB
-    MongoSpark.save(APPL.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.APPL")))
-    MongoSpark.save(MSFT.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.MSFT")))
-    MongoSpark.save(TSLA.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.TSLA")))
+    try{
+      MongoSpark.save(APPL.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.APPL")))
+      MongoSpark.save(MSFT.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.MSFT")))
+      MongoSpark.save(TSLA.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.TSLA")))
+    }catch{
+      case e: com.mongodb.MongoSocketWriteException => println("Error while ingesting data into mongo")
+    }
+    
   }
 }
