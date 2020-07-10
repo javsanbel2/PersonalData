@@ -1,0 +1,2 @@
+cd C:\games\kafka\bin\windows
+kafka-producer-perf-test.bat --topic JivWn --num-records 15000000 --record-size 100 --throughput 15000000 --producer-props acks=1 bootstrap.servers=localhost:9092 buffer.memory=67108864 compression.type=none batch.size=8196

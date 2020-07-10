@@ -14,7 +14,7 @@ import java.sql.Timestamp
 import com.mongodb.spark._
 import com.mongodb.spark.config._
 import scala.util.Try
-
+import java.io.{File, PrintWriter}
 
 object dataStream {
   
@@ -42,14 +42,16 @@ object dataStream {
   
   
   def main(args : Array[String]){
-    println("helloe")
-    println(java.time.LocalDate.now)
-    Logger.getLogger("org").setLevel(Level.ERROR)
-     val spark: SparkSession = SparkSession.builder()
-      .master("local[*]")
-      .appName("kafkaStream")
-      .getOrCreate()
-      
+    val writer = new PrintWriter(new File("output.log"))
+    writer.write("consumer log file\n")
+    writer.write(java.time.LocalDate.now.toString()+"\n")
+    var org = Logger.getLogger("org").setLevel(Level.ERROR)
+    var kfk = Logger.getLogger("kafka").setLevel(Level.INFO)
+    val spark: SparkSession = SparkSession.builder()
+    .master("local[*]")
+    .appName("kafkaStream")
+    .getOrCreate()
+    writer.write(org.toString()+"\n")
     import spark.implicits._
     //dummpy data for test
     val someDF = Seq(("LOLL",287.33,17,2, Timestamp.valueOf("2020-06-29 15:26:48"))).toDF("t", "p","x","s","dt")
@@ -62,6 +64,20 @@ object dataStream {
       .option("subscribe", "stockData")
       .load()
     df.printSchema
+    writer.write(kfk.toString()+"\n")
+    
+    //getting offset of last commited message
+    val ofsetDF = df.select(($"offset").cast("int"))
+    //drop all rows with null values
+    val ofstTemp = ofsetDF.na.drop()
+    // if null removes properly
+    if(ofstTemp.count == ofsetDF.count){
+        writer.write("error null rows in the dataset\n")
+    }
+    val y = ofstTemp.agg(max("offset")).take(1)
+    for (data <- y){
+       writer.write("\noffset of last message "+data(0).toString+"\n")
+    }
     
     val selectDF = df.select(get_json_object(($"value").cast("string"),"$.data.T").alias("ticker"),
                              get_json_object(($"value").cast("string"),"$.data.p").alias("price"),
@@ -70,10 +86,6 @@ object dataStream {
                              get_json_object(($"value").cast("string"),"$.data.t").alias("date_time"))
     //drop all rows with null values
     val temp = selectDF.na.drop()
-    // if null removes properly
-    if(temp.count == selectDF.count){
-        println("error null rows in the dataset")
-    }
     
     val temp2 = checkData(temp)
     temp2.printSchema
@@ -99,8 +111,9 @@ object dataStream {
       MongoSpark.save(MSFT.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.MSFT")))
       MongoSpark.save(TSLA.write.mode("overwrite"), WriteConfig(Map("uri" -> "mongodb://127.0.0.1/mydb.TSLA")))
     }catch{
-      case e: com.mongodb.MongoSocketWriteException => println("Error while ingesting data into mongo")
+      case e: com.mongodb.MongoSocketWriteException => writer.write("Error while ingesting data into mongo")
     }
     
+    writer.close()
   }
 }
